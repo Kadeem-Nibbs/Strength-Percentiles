@@ -14,11 +14,12 @@
 import urllib2
 from bs4 import BeautifulSoup
 import sqlite3 as sq
-
+import pandas as pd
 
 # The page from which the program collects powerlifting meet results
 QUOTE_PAGE = 'http://meets.revolutionpowerlifting.com/results/2016-meet-results/ny-states/'
 DATABASE = 'meet_results.db'
+MEET_RESULTS_TABLE = 'meet_results'
 
 # Each row of the MEET_RESULTS_TABLE contains information corresponding to
 # one lifter in the competition.  Desired information is accessed
@@ -47,10 +48,12 @@ def parse_result_and_categories(row):
 
     Returns:
     --------
-    result, categories: Result is tuple of ints, or None, containing the
-    (squat, bench, deadlift) of the lifter. categories is tuple of strings,
-    containing the (gender, professional_status, equipment) of the
-    lifter.  Returns None if the row contains headers and no information.
+    result_and_categories: tuple of strings and floats, or None
+        A tuple, the first three indices of which contain a lifter's
+        categorical information (gender, professional status, and equipment),
+        and the later indices of which contain their squat, bench, deadlift,
+        and total.  Returns None if the input row does not contain any lifter
+        information (is a header row).
 
     """
     row = row.contents # list of HTML objects in row
@@ -106,7 +109,7 @@ def get_data_from_table(row, column):
             return data
     return data
 
-def populate_database(webpage, database):
+def populate_database(webpage, database, table):
     """
     Creates SQLite database with specified name.  Creates table inside the
     database and populates it with results of powerlifting meets.  If the
@@ -115,20 +118,25 @@ def populate_database(webpage, database):
 
     Paramaters:
     -----------
+    webpage: string
+        String specifying webpage from which to scrape meet results.
     database: string
         String specifying the name of the database in which to store meet
         results.
-    webpage: string
-        String specifying webpage from which to scrape meet results.
+    table: string
+        String specifying the name of the table in the database in which
+        to store meet results.
 
     """
-    table_deletion_string = "drop table if exists meet_results"
+    table_deletion_string = "drop table if exists %s" % table
 
-    create_table_string = """CREATE TABLE meet_results (
+    table_empty_string = "SELECT COUNT(*) from %s" % table
+
+    create_table_string = """CREATE TABLE if not exists %s (
     lifter_id INTEGER PRIMARY KEY, gender TEXT,
     professional_status TEXT, equipment TEXT, squat REAL,
     bench REAL, deadlift REAL, total REAL)
-    """
+    """ % table
 
     # IMPORTANT NOTE: Instead of using the SQLite's parameterized query
     # feature, where the ?'s are placeholders for the parameters and the
@@ -162,13 +170,17 @@ def populate_database(webpage, database):
     """
     connection = sq.connect(database)
     cursor = connection.cursor()
-    cursor.execute(table_deletion_string) # Delete table if it already exists
+    #cursor.execute(table_deletion_string) # Delete table if it already exists
                                     # if we attempt to create a table with a
                                     # name that is already in use an error will
                                     # result.  The remade table will be more
                                     # up-to-date anyway.
     cursor.execute(create_table_string)
+    meet_results_table_empty = cursor.execute(table_empty_string)
 
+    # Don't attempt to add data to table unless empty
+    if not meet_results_table_empty:
+        return
     page = urllib2.urlopen(webpage)
     soup = BeautifulSoup(page, 'html.parser')
     meet_results_table = soup.find_all('tr') # all rows of meet results table,
@@ -183,5 +195,62 @@ def populate_database(webpage, database):
     connection.commit()
     connection.close()
 
+####### Pandas functions
+def find_percentile(database,squat=None, bench=None, deadlift=None, total=None):
+    """
+    Finds the percentile of the input squat, bench, deadlift and total numbers
+    among the sample of results in the database.
+
+    Parameters:
+    -----------
+    database: TBD
+        Database containing squat, bench, deadlift, and/or total numbers
+        against which to compare the input numbers.
+    squat, bench, deadlift, total: float
+        Floating numbers representing a user's performance in the respective
+        category.  Will be compared against the results in the database.
+
+    Returns:
+    --------
+    percentile: float
+        The user's percentile rank among the lifters in the database in the
+        input categories.
+
+    """
+    pass
+
+def get_population_by_categories(connection, table, **categories):
+    get_population_string = """Select * from {table}
+        WHERE gender LIKE "{gender}%" AND
+        professional_status LIKE "{professional_status}%" and
+        equipment LIKE "{equipment}%";
+        """.format(table=table,**categories)
+    cursor = connection.cursor()
+    population_database = cursor.execute(get_population_string)
+    population_dataframe = pd.read_sql(get_population_string, connection)
+    return population_dataframe
+
+def find_average(dataframe, lift):
+    means = dataframe.mean()
+    return means[lift]
+
+def database_to_dataframe(connection, table_name):
+    read_sql_string = "select * from %s" % table_name
+    dataframe = pd.read_sql(read_sql_string, connection)
+    return dataframe
+
+def standard_deviation(dataframe, *lifts):
+    pass
+
+
+########################
 if __name__ == "__main__":
-    populate_database(QUOTE_PAGE, DATABASE)
+    populate_database(QUOTE_PAGE, DATABASE, MEET_RESULTS_TABLE)
+    connection = sq.connect(DATABASE)
+    categories = {'gender':'Female',
+        'professional_status': 'AM',
+        'equipment': 'Raw'
+        }
+    dataframe = get_population_by_categories(connection, MEET_RESULTS_TABLE, **categories)
+    print dataframe
+    print find_average(dataframe, "squat")
