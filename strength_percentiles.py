@@ -21,6 +21,23 @@ QUOTE_PAGE = 'http://meets.revolutionpowerlifting.com/results/2016-meet-results/
 DATABASE = 'meet_results.db'
 MEET_RESULTS_TABLE = 'meet_results'
 
+FEMALE = 'Female'
+MALE = 'Male'
+GENDER = ('gender', (FEMALE, MALE, "")) # first index is column name in
+                                # meet_results table, second index contains
+                                # strings that identify possible values
+                                # Empty string denotes any gender
+AMATEUR = 'AM'
+PROFESSIONAL = 'Pro'
+PROFESSIONAL_STATUS = ('professional_status', (AMATEUR, PROFESSIONAL, "")) # ...
+RAW = 'Raw'
+EQUIPPED = 'Ply'
+EQUIPMENT = ('equipment', (RAW, EQUIPPED, "")) # ...
+SQUAT = 'squat'
+BENCH = 'bench'
+DEADLIFT = 'deadlift'
+TOTAL = 'total'
+
 # Each row of the MEET_RESULTS_TABLE contains information corresponding to
 # one lifter in the competition.  Desired information is accessed
 # through the appropriate column of the table.  Column numbers start at 0.
@@ -59,21 +76,21 @@ def parse_result_and_categories(row):
     row = row.contents # list of HTML objects in row
     if row[1].get('colspan'): # row contains column headers and no data, ignore
         return
-    gender = get_data_from_table(row, GENDER_COLUMN) # string
-    professional_status = get_data_from_table(row, PROFESSIONAL_STATUS_COLUMN) # ...
-    equipment = get_data_from_table(row, EQUIPMENT_COLUMN) # ...
-    squat = get_data_from_table(row, SQUAT_COLUMN) # float or None
-    bench = get_data_from_table(row, BENCH_COLUMN) # ...
-    deadlift = get_data_from_table(row, DEADLIFT_COLUMN) # ...
+    format_dictionary = {GENDER[0]: GENDER_COLUMN,
+                        PROFESSIONAL_STATUS[0]: PROFESSIONAL_STATUS_COLUMN,
+                        EQUIPMENT[0]: EQUIPMENT_COLUMN,
+                        SQUAT: SQUAT_COLUMN,
+                        BENCH: BENCH_COLUMN,
+                        DEADLIFT: DEADLIFT_COLUMN}
+    results_dictionary = {key: get_data_from_table(row, key_column) \
+        for key, key_column in format_dictionary.items()}
 
     if squat and bench and deadlift: # Valid entries for each lift in row
-        total = squat + bench + deadlift
+        results_dictionary['total'] = squat + bench + deadlift
     else:
-        total = None
+        results_dictionary['total'] = None
 
-    result_and_categories = (gender, professional_status, equipment, squat,
-        bench, deadlift, total)
-    return result_and_categories
+    return results_dictionary
 
 def get_data_from_table(row, column):
     """
@@ -138,17 +155,6 @@ def populate_database(webpage, database, table):
     bench REAL, deadlift REAL, total REAL)
     """ % table
 
-    # IMPORTANT NOTE: Instead of using the SQLite's parameterized query
-    # feature, where the ?'s are placeholders for the parameters and the
-    # parameters are supplied in an iterable as the second argument to the
-    # cursor's execute method, I also had the option of formatting the command
-    # using Python string formatting, to insert the information I collected
-    # from online into the command string.  However, this would expose my
-    # computer to risks similar to those posed by Python 2's input function.
-    # If I happened to collect malicious SQL code from the internet, it would
-    # be formatted into the command and executed.  SQLite's parameterized
-    # query feature allows me to harmlessly insert the information I collect
-    # online into a database without executing it.
     result_storage_string = """INSERT INTO meet_results (
     gender,
     professional_status,
@@ -159,13 +165,13 @@ def populate_database(webpage, database, table):
     total)
 
     Values (
-    ?,
-    ?,
-    ?,
-    ?,
-    ?,
-    ?,
-    ?
+    :gender,
+    :professional_status,
+    :equipment,
+    :squat,
+    :bench,
+    :deadlift,
+    :total
     )
     """
     connection = sq.connect(database)
@@ -176,11 +182,17 @@ def populate_database(webpage, database, table):
                                     # result.  The remade table will be more
                                     # up-to-date anyway.
     cursor.execute(create_table_string)
-    meet_results_table_empty = cursor.execute(table_empty_string)
+    cursor.execute(table_empty_string)
+
+    # Here cursor returns a list containing a 1-tuple, the first element of
+    # which is the number of rows in the table. I use [0][0] to access the
+    # first element of the tuple.
+    meet_results_table_populated = cursor.fetchall()[0][0]
 
     # Don't attempt to add data to table unless empty
-    if not meet_results_table_empty:
+    if meet_results_table_populated:
         return
+
     page = urllib2.urlopen(webpage)
     soup = BeautifulSoup(page, 'html.parser')
     meet_results_table = soup.find_all('tr') # all rows of meet results table,
@@ -196,19 +208,19 @@ def populate_database(webpage, database, table):
     connection.close()
 
 ####### Pandas functions
-def find_percentile(database,squat=None, bench=None, deadlift=None, total=None):
+def find_percentile(dataframe, lifts):
     """
     Finds the percentile of the input squat, bench, deadlift and total numbers
     among the sample of results in the database.
 
     Parameters:
     -----------
-    database: TBD
-        Database containing squat, bench, deadlift, and/or total numbers
+    dataframe: pandas dataframe
+        Dataframe containing squat, bench, deadlift, and/or total numbers
         against which to compare the input numbers.
-    squat, bench, deadlift, total: float
-        Floating numbers representing a user's performance in the respective
-        category.  Will be compared against the results in the database.
+    lifts: dictionary with string keys and float (or None) values
+        A dictionary that contains keys ('squat', 'bench', 'deadlift', 'total').
+        The values are floats representing someone's performance in the lift.
 
     Returns:
     --------
@@ -217,9 +229,40 @@ def find_percentile(database,squat=None, bench=None, deadlift=None, total=None):
         input categories.
 
     """
-    pass
+    percentiles = []
+    for lift in (SQUAT, BENCH, DEADLIFT, TOTAL):
+        if lift:
+            entered_lift = lifts[lift]
+            all_competitor_lifts = dataframe[lift]
+            number_of_lifts = all_competitor_lifts.count()
+            number_of_smaller_lifts = all_competitor_lifts[all_competitor_lifts < entered_lift].count()
+            percentile = (float(number_of_smaller_lifts)/number_of_lifts) * 100
+            percentiles.append(lift + ": " + str(percentile))
+        else:
+            percentiles.append("N/A")
+    return percentiles
 
-def get_population_by_categories(connection, table, **categories):
+def get_population_by_categories(connection, table, categories):
+    """
+    Returns a dataframe containing the powerlifting results of the people who
+    fit the input categories.
+    Parameters:
+    -----------
+        connection: sqlite3 connection object
+            connection to the database containing desired table
+        table: string
+            string specifying the name of the table containing desired
+            powerlifting meet results
+        categories: dictionary
+            Contains values for gender, professional_status, and equipment
+            fields to use to query the table
+    Returns:
+    --------
+        population_dataframe: pandas dataframe
+            dataframe containing the meet results of all lifters who fit the
+            input criteria.
+
+    """
     get_population_string = """Select * from {table}
         WHERE gender LIKE "{gender}%" AND
         professional_status LIKE "{professional_status}%" and
@@ -239,18 +282,68 @@ def database_to_dataframe(connection, table_name):
     dataframe = pd.read_sql(read_sql_string, connection)
     return dataframe
 
+def get_categories_from_user():
+    print "Please respond to the following prompts. "
+    gender = 'gender'
+    professional_status = 'professional_status'
+    equipment = 'equipment'
+    categories = {GENDER: None, PROFESSIONAL_STATUS: None, EQUIPMENT: None}
+    user_dictionary = {GENDER[0]: None, PROFESSIONAL_STATUS[0]: None, EQUIPMENT[0]: None}
+    for category in categories:
+        # Remember, the first index of category will contain the category
+        # name (i.e. either 'gender', 'professional_status', or 'equipment')
+        # the second index contains the accepted values for the category
+        category_name = category[0]
+        accepted_values = category[1]
+        prompt_for_category = "What is your %s? Please enter one of %r." \
+            % (category_name, accepted_values)
+        while True:
+            response = raw_input(prompt_for_category)
+            if response not in accepted_values:
+                print "Please enter one of the accepted values. "
+                continue
+            user_dictionary[category_name] = response
+            break
+    return user_dictionary
+
+
+def get_lifts_from_user():
+    print "Please enter your lifts below in lbs."
+    lifts = {SQUAT: None, BENCH: None, DEADLIFT: None}
+    for lift in lifts:
+        prompt_for_lift = "What is your %s? " % lift
+        while True:
+            try:
+                response = float(raw_input(prompt_for_lift))
+                if response < 0:
+                    print "Don't be so hard on yourself.  Please answer seriously."
+                    continue
+                if response > 1500:
+                    print "Okay Ronnie Coleman ... I'll ask you one more time."
+                    continue
+            except ValueError: # user didn't enter a number
+                print "You did not enter a number.  Please try again."
+            else:
+                lifts[lift] = response
+                break
+    if lifts[SQUAT] and lifts[BENCH] and lifts[DEADLIFT]:
+        lifts[TOTAL] = lifts[SQUAT] + lifts[BENCH] + lifts[DEADLIFT]
+    else:
+        lifts[TOTAL] = None
+    return lifts
+
 def standard_deviation(dataframe, *lifts):
     pass
 
-
-########################
-if __name__ == "__main__":
+def main():
     populate_database(QUOTE_PAGE, DATABASE, MEET_RESULTS_TABLE)
     connection = sq.connect(DATABASE)
-    categories = {'gender':'Female',
-        'professional_status': 'AM',
-        'equipment': 'Raw'
-        }
-    dataframe = get_population_by_categories(connection, MEET_RESULTS_TABLE, **categories)
-    print dataframe
-    print find_average(dataframe, "squat")
+    categories = get_categories_from_user()
+    lifts = get_lifts_from_user()
+    competition = get_population_by_categories(connection, MEET_RESULTS_TABLE, categories)
+    print competition
+    percentiles = find_percentile(competition, lifts)
+    print percentiles
+########################
+if __name__ == "__main__":
+    main()
