@@ -181,11 +181,6 @@ def populate_database(webpage, database, table):
     """
     connection = sq.connect(database)
     cursor = connection.cursor()
-    #cursor.execute(table_deletion_string) # Delete table if it already exists
-                                    # if we attempt to create a table with a
-                                    # name that is already in use an error will
-                                    # result.  The remade table will be more
-                                    # up-to-date anyway.
     cursor.execute(create_table_string)
     cursor.execute(table_empty_string)
 
