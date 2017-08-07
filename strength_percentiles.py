@@ -14,11 +14,36 @@
 import urllib2
 from bs4 import BeautifulSoup
 import sqlite3 as sq
-
+import pandas as pd
 
 # The page from which the program collects powerlifting meet results
 QUOTE_PAGE = 'http://meets.revolutionpowerlifting.com/results/2016-meet-results/ny-states/'
 DATABASE = 'meet_results.db'
+MEET_RESULTS_TABLE = 'meet_results'
+
+# Lifter categories
+GENDER = 'gender'
+FEMALE = 'Female'
+MALE = 'Male'
+AMATEUR = 'AM'
+PROFESSIONAL_STATUS = 'professional_status'
+PROFESSIONAL = 'Pro'
+EQUIPMENT = 'equipment'
+RAW = 'Raw'
+EQUIPPED = 'Ply' # There are two classifications for equipped lifters,
+                # single-ply and multi-ply. In this program I lump them into
+                # one group by their shared suffix
+
+# Lifts
+SQUAT = 'squat'
+BENCH = 'bench'
+DEADLIFT = 'deadlift'
+TOTAL = 'total'
+
+# Possible values for each category
+CATEGORY_VALUES = {GENDER: (FEMALE, MALE),
+                   PROFESSIONAL_STATUS: (AMATEUR, PROFESSIONAL),
+                   EQUIPMENT: (RAW, EQUIPPED)}
 
 # Each row of the MEET_RESULTS_TABLE contains information corresponding to
 # one lifter in the competition.  Desired information is accessed
@@ -32,7 +57,7 @@ SQUAT_COLUMN = 15 # ...
 BENCH_COLUMN = 17 # ...
 DEADLIFT_COLUMN = 19 # ...
 
-def parse_result_and_categories(row):
+def parse_row(row):
     """
     Parses table row of BeautifulSoup object for categories (gender,
     professional status, equipment) and result (squat, bench, deadlift) of
@@ -47,30 +72,32 @@ def parse_result_and_categories(row):
 
     Returns:
     --------
-    result, categories: Result is tuple of ints, or None, containing the
-    (squat, bench, deadlift) of the lifter. categories is tuple of strings,
-    containing the (gender, professional_status, equipment) of the
-    lifter.  Returns None if the row contains headers and no information.
+    result_and_categories: tuple of strings and floats, or None
+        A tuple, the first three indices of which contain a lifter's
+        categorical information (gender, professional status, and equipment),
+        and the later indices of which contain their squat, bench, deadlift,
+        and total.  Returns None if the input row does not contain any lifter
+        information (is a header row).
 
     """
     row = row.contents # list of HTML objects in row
     if row[1].get('colspan'): # row contains column headers and no data, ignore
         return
-    gender = get_data_from_table(row, GENDER_COLUMN) # string
-    professional_status = get_data_from_table(row, PROFESSIONAL_STATUS_COLUMN) # ...
-    equipment = get_data_from_table(row, EQUIPMENT_COLUMN) # ...
-    squat = get_data_from_table(row, SQUAT_COLUMN) # float or None
-    bench = get_data_from_table(row, BENCH_COLUMN) # ...
-    deadlift = get_data_from_table(row, DEADLIFT_COLUMN) # ...
+    format_dictionary = {GENDER: GENDER_COLUMN,
+                        PROFESSIONAL_STATUS: PROFESSIONAL_STATUS_COLUMN,
+                        EQUIPMENT: EQUIPMENT_COLUMN,
+                        SQUAT: SQUAT_COLUMN,
+                        BENCH: BENCH_COLUMN,
+                        DEADLIFT: DEADLIFT_COLUMN}
+    results_dictionary = {field: get_data_from_table(row, field_column) \
+        for field, field_column in format_dictionary.items()}
 
     if squat and bench and deadlift: # Valid entries for each lift in row
-        total = squat + bench + deadlift
+        results_dictionary[TOTAL] = squat + bench + deadlift
     else:
-        total = None
+        results_dictionary[TOTAL] = None
 
-    result_and_categories = (gender, professional_status, equipment, squat,
-        bench, deadlift, total)
-    return result_and_categories
+    return results_dictionary
 
 def get_data_from_table(row, column):
     """
@@ -106,7 +133,7 @@ def get_data_from_table(row, column):
             return data
     return data
 
-def populate_database(webpage, database):
+def populate_database(webpage, database, table):
     """
     Creates SQLite database with specified name.  Creates table inside the
     database and populates it with results of powerlifting meets.  If the
@@ -115,32 +142,24 @@ def populate_database(webpage, database):
 
     Paramaters:
     -----------
+    webpage: string
+        String specifying webpage from which to scrape meet results.
     database: string
         String specifying the name of the database in which to store meet
         results.
-    webpage: string
-        String specifying webpage from which to scrape meet results.
+    table: string
+        String specifying the name of the table in the database in which
+        to store meet results.
 
     """
-    table_deletion_string = "drop table if exists meet_results"
+    table_empty_string = "SELECT COUNT(*) from %s" % table
 
-    create_table_string = """CREATE TABLE meet_results (
+    create_table_string = """CREATE TABLE if not exists %s (
     lifter_id INTEGER PRIMARY KEY, gender TEXT,
     professional_status TEXT, equipment TEXT, squat REAL,
     bench REAL, deadlift REAL, total REAL)
-    """
+    """ % table
 
-    # IMPORTANT NOTE: Instead of using the SQLite's parameterized query
-    # feature, where the ?'s are placeholders for the parameters and the
-    # parameters are supplied in an iterable as the second argument to the
-    # cursor's execute method, I also had the option of formatting the command
-    # using Python string formatting, to insert the information I collected
-    # from online into the command string.  However, this would expose my
-    # computer to risks similar to those posed by Python 2's input function.
-    # If I happened to collect malicious SQL code from the internet, it would
-    # be formatted into the command and executed.  SQLite's parameterized
-    # query feature allows me to harmlessly insert the information I collect
-    # online into a database without executing it.
     result_storage_string = """INSERT INTO meet_results (
     gender,
     professional_status,
@@ -151,23 +170,27 @@ def populate_database(webpage, database):
     total)
 
     Values (
-    ?,
-    ?,
-    ?,
-    ?,
-    ?,
-    ?,
-    ?
+    :gender,
+    :professional_status,
+    :equipment,
+    :squat,
+    :bench,
+    :deadlift,
+    :total
     )
     """
     connection = sq.connect(database)
     cursor = connection.cursor()
-    cursor.execute(table_deletion_string) # Delete table if it already exists
-                                    # if we attempt to create a table with a
-                                    # name that is already in use an error will
-                                    # result.  The remade table will be more
-                                    # up-to-date anyway.
     cursor.execute(create_table_string)
+    cursor.execute(table_empty_string)
+
+    # Here cursor returns a list containing the number of rows in the table
+    # I access that number with [0]
+    meet_results_table_populated = cursor.fetchone()[0]
+
+    # Don't attempt to add data to table unless empty
+    if meet_results_table_populated:
+        return
 
     page = urllib2.urlopen(webpage)
     soup = BeautifulSoup(page, 'html.parser')
@@ -176,12 +199,189 @@ def populate_database(webpage, database):
                                              # individual's performance at the
                                              # meet
     for row in meet_results_table: # information for one lifter
-        result_and_categories = parse_result_and_categories(row)
+        result_and_categories = parse_row(row)
         if result_and_categories: # row contains results of meet
             cursor.execute(result_storage_string, result_and_categories)
 
     connection.commit()
     connection.close()
 
+####### Pandas functions
+def find_percentile(dataframe, lifts):
+    """
+    Finds the percentile of the input squat, bench, deadlift and total numbers
+    among the sample of results in the database.
+
+    Parameters:
+    -----------
+    dataframe: pandas dataframe
+        Dataframe containing squat, bench, deadlift, and/or total numbers
+        against which to compare the input numbers.
+    lifts: dictionary with string keys and float (or None) values
+        A dictionary that contains keys ('squat', 'bench', 'deadlift', 'total').
+        The values are floats representing someone's performance in the lift.
+
+    Returns:
+    --------
+    percentile: float
+        The user's percentile rank among the lifters in the database in the
+        input categories.
+
+    """
+    percentiles = []
+    for lift in (SQUAT, BENCH, DEADLIFT, TOTAL):
+        if lifts[lift]: # valid entry for lift
+            entered_lift = lifts[lift]
+            all_competitor_lifts = dataframe[lift]
+            number_of_lifts = all_competitor_lifts.count()
+            number_of_smaller_lifts = all_competitor_lifts[all_competitor_lifts < entered_lift].count()
+            percentile = (float(number_of_smaller_lifts)/number_of_lifts) * 100
+            percentiles.append(lift + ": " + str(percentile) + " percentile")
+        else: # no lift was entered
+            percentiles.append("N/A")
+    return percentiles
+
+def get_population_by_categories(connection, table, categories):
+    """
+    Returns a dataframe containing the powerlifting results of the people who
+    fit the input categories.
+    Parameters:
+    -----------
+    connection: sqlite3 connection object
+        Connection to the database containing desired table
+    table: string
+        string specifying the name of the table containing desired
+        powerlifting meet results
+    categories: dictionary
+        Contains values for gender, professional_status, and equipment
+        fields to use to query the table
+    Returns:
+    --------
+    population_dataframe: pandas dataframe
+        dataframe containing the meet results of all lifters who fit the
+        input criteria.
+
+    """
+    get_population_string = """Select * from {table}
+        WHERE gender LIKE "{gender}%" AND
+        professional_status LIKE "{professional_status}%" and
+        equipment LIKE "{equipment}%";
+        """.format(table=table,**categories)
+    cursor = connection.cursor()
+    population_database = cursor.execute(get_population_string)
+    population_dataframe = pd.read_sql(get_population_string, connection)
+    return population_dataframe
+
+def find_average(dataframe, lift):
+    """
+    Returns the average value of the entered lift in the dataframe.
+    Paramaters:
+    -----------
+    dataframe: pandas dataframe
+        A dataframe containing at least one column labeled 'squat',
+        'bench', or 'deadlift'
+    lift: string
+        Either 'squat', 'bench', or 'deadlift'.
+    Returns:
+    --------
+    mean_lift: float
+        The average of every lift (either squat, bench, or deadlift),
+        entered in the dataframe.
+
+    """
+    means = dataframe.mean()
+    mean_lift = means[lift]
+    return mean_lift
+
+
+def get_categories_from_user():
+    """
+    Prompts users for information on their gender, professional status, and
+    equipment category that they compete in. Returns a dictionary containing
+    the user's responses.
+    Returns:
+    --------
+    user_categories: dictionary
+        A dictionary with category names ('gender', 'professional_status'
+        and 'equipment') as keys and the users responses as values.
+
+    """
+    print "Please respond to the following prompts. "
+    gender = 'gender'
+    professional_status = 'professional_status'
+    equipment = 'equipment'
+    user_categories = {GENDER: None, PROFESSIONAL_STATUS: None, EQUIPMENT: None}
+    for category_name, accepted_values in CATEGORY_VALUES.iteritems():
+        prompt_for_category = "What is your %s? Please enter one of %r, " \
+            % (category_name, accepted_values) + " or press Return to be " + \
+            "compared to both."
+        while True:
+            response = raw_input(prompt_for_category)
+            # User should either enter the category they want to be compared
+            # against, or an empty string to be compared to both.  If their
+            # response was not one of these, prompt them to try again.
+            if response not in accepted_values and response:
+                print "Your entry was not valid.  Please try again."
+                continue
+            user_categories[category_name] = response
+            break
+    return user_categories
+
+
+def get_lifts_from_user():
+    """
+    Prompts users for information on their lifts.  Returns a dictionary
+    containing the user's responses.
+    Returns:
+    --------
+    lifts: dictionary
+        A dictionary with lift names ('squat', 'bench', 'deadlift') and
+        'total' as keys and the users responses as values, with the exception
+        of lifts['total'].  The lifters total is calculated and loaded into
+        the dictionary if valid numeric values were given for all three lifts,
+        and None is loaded for the total if there are missing values.
+
+    """
+    print "Please enter your lifts below in lbs."
+    lifts = {SQUAT: None, BENCH: None, DEADLIFT: None}
+    for lift in lifts:
+        prompt_for_lift = "What is your %s? Hit return to skip this lift." \
+            % lift
+        while True:
+            try:
+                response = raw_input(prompt_for_lift)
+                if not response: # user entered empty string
+                    response = None
+                    break
+                response = float(response)
+                if response < 0: # user is a smartass
+                    print "Don't be so hard on yourself.  Please answer seriously."
+                    continue
+                if response > 1500: # lift is higher than world records,
+                                    # user is lying or is superman
+                    print "Okay Ronnie Coleman ... I'll ask you one more time."
+                    continue
+            except ValueError: # user didn't enter a number
+                print "You did not enter a number.  Please try again."
+            else:
+                lifts[lift] = response
+                break
+    if lifts[SQUAT] and lifts[BENCH] and lifts[DEADLIFT]:
+        lifts[TOTAL] = lifts[SQUAT] + lifts[BENCH] + lifts[DEADLIFT]
+    else:
+        lifts[TOTAL] = None
+    return lifts
+
+def main():
+    populate_database(QUOTE_PAGE, DATABASE, MEET_RESULTS_TABLE)
+    connection = sq.connect(DATABASE)
+    categories = get_categories_from_user()
+    lifts = get_lifts_from_user()
+    competition = get_population_by_categories(connection, MEET_RESULTS_TABLE, categories)
+    print competition
+    percentiles = find_percentile(competition, lifts)
+    print percentiles
+
+########################
 if __name__ == "__main__":
-    populate_database(QUOTE_PAGE, DATABASE)
+    main()
