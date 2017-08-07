@@ -235,14 +235,14 @@ def find_percentile(dataframe, lifts):
     """
     percentiles = []
     for lift in (SQUAT, BENCH, DEADLIFT, TOTAL):
-        if lift:
+        if lifts[lift]: # valid entry for lift
             entered_lift = lifts[lift]
             all_competitor_lifts = dataframe[lift]
             number_of_lifts = all_competitor_lifts.count()
             number_of_smaller_lifts = all_competitor_lifts[all_competitor_lifts < entered_lift].count()
             percentile = (float(number_of_smaller_lifts)/number_of_lifts) * 100
             percentiles.append(lift + ": " + str(percentile) + " percentile")
-        else:
+        else: # no lift was entered
             percentiles.append("N/A")
     return percentiles
 
