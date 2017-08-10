@@ -15,6 +15,7 @@ import urllib2
 from bs4 import BeautifulSoup
 import sqlite3 as sq
 import pandas as pd
+import numbers
 
 # The page from which the program collects powerlifting meet results
 QUOTE_PAGE = 'http://meets.revolutionpowerlifting.com/results/2016-meet-results/ny-states/'
@@ -57,6 +58,13 @@ SQUAT_COLUMN = 15 # ...
 BENCH_COLUMN = 17 # ...
 DEADLIFT_COLUMN = 19 # ...
 
+FORMAT_DICTIONARY = {GENDER: GENDER_COLUMN,
+                    PROFESSIONAL_STATUS: PROFESSIONAL_STATUS_COLUMN,
+                    EQUIPMENT: EQUIPMENT_COLUMN,
+                    SQUAT: SQUAT_COLUMN,
+                    BENCH: BENCH_COLUMN,
+                    DEADLIFT: DEADLIFT_COLUMN}
+
 def parse_row(row):
     """
     Parses table row of BeautifulSoup object for categories (gender,
@@ -83,14 +91,8 @@ def parse_row(row):
     row = row.contents # list of HTML objects in row
     if row[1].get('colspan'): # row contains column headers and no data, ignore
         return
-    format_dictionary = {GENDER: GENDER_COLUMN,
-                        PROFESSIONAL_STATUS: PROFESSIONAL_STATUS_COLUMN,
-                        EQUIPMENT: EQUIPMENT_COLUMN,
-                        SQUAT: SQUAT_COLUMN,
-                        BENCH: BENCH_COLUMN,
-                        DEADLIFT: DEADLIFT_COLUMN}
     results_dictionary = {field: get_data_from_table(row, field_column) \
-        for field, field_column in format_dictionary.items()}
+        for field, field_column in FORMAT_DICTIONARY.items()}
 
     if squat and bench and deadlift: # Valid entries for each lift in row
         results_dictionary[TOTAL] = squat + bench + deadlift
@@ -230,7 +232,7 @@ def find_percentile(dataframe, lifts):
     """
     percentiles = []
     for lift in (SQUAT, BENCH, DEADLIFT, TOTAL):
-        if lifts[lift]: # valid entry for lift
+        if isinstance(lifts[lift], numbers.Real): # valid numeric entry for lift
             entered_lift = lifts[lift]
             all_competitor_lifts = dataframe[lift]
             number_of_lifts = all_competitor_lifts.count()
@@ -271,28 +273,6 @@ def get_population_by_categories(connection, table, categories):
     population_database = cursor.execute(get_population_string)
     population_dataframe = pd.read_sql(get_population_string, connection)
     return population_dataframe
-
-def find_average(dataframe, lift):
-    """
-    Returns the average value of the entered lift in the dataframe.
-    Paramaters:
-    -----------
-    dataframe: pandas dataframe
-        A dataframe containing at least one column labeled 'squat',
-        'bench', or 'deadlift'
-    lift: string
-        Either 'squat', 'bench', or 'deadlift'.
-    Returns:
-    --------
-    mean_lift: float
-        The average of every lift (either squat, bench, or deadlift),
-        entered in the dataframe.
-
-    """
-    means = dataframe.mean()
-    mean_lift = means[lift]
-    return mean_lift
-
 
 def get_categories_from_user():
     """
@@ -366,7 +346,12 @@ def get_lifts_from_user():
             else:
                 lifts[lift] = response
                 break
-    if lifts[SQUAT] and lifts[BENCH] and lifts[DEADLIFT]:
+    user_entered_lifts = [lifts[SQUAT], lifts[BENCH], lifts[DEADLIFT]]
+    # True if user entered valid numbers for all lifts, False otherwise
+    valid_entries_for_all_lifts = \
+        reduce(lambda x, y: isinstance(x, numbers.Real) \
+        and isinstance(y, Numbers.Real), user_entered_lifts)
+    if valid_entries_for_all_lifts:
         lifts[TOTAL] = lifts[SQUAT] + lifts[BENCH] + lifts[DEADLIFT]
     else:
         lifts[TOTAL] = None
