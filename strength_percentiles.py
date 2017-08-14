@@ -209,38 +209,40 @@ def populate_database(webpage, database, table):
     connection.close()
 
 ####### Pandas functions
-def find_percentile(dataframe, lifts):
+def find_percentile(lifts_df, user_lifts):
     """
     Finds the percentile of the input squat, bench, deadlift and total numbers
     among the sample of results in the database.
 
     Parameters:
     -----------
-    dataframe: pandas dataframe
+    lifts_df: pandas dataframe
         Dataframe containing squat, bench, deadlift, and/or total numbers
         against which to compare the input numbers.
-    lifts: dictionary with string keys and float (or None) values
+    user_lifts: dictionary with string keys and float (or None) values
         A dictionary that contains keys ('squat', 'bench', 'deadlift', 'total').
         The values are floats representing someone's performance in the lift.
 
     Returns:
     --------
-    percentile: float
-        The user's percentile rank among the lifters in the database in the
-        input categories.
+    percentile: dictionary with string keys string values
+        Dictionary where key is one of "squat", "bench", and "deadlift" and
+        the value is either a string relaying the input lifts percentile
+        among the lifts in the database, or "N/A" if a valid number was not
+        input for the lift.
 
     """
-    percentiles = []
+    percentiles = {SQUAT: None, BENCH: None, DEADLIFT: None}
     for lift in (SQUAT, BENCH, DEADLIFT, TOTAL):
-        if isinstance(lifts[lift], numbers.Real): # valid numeric entry for lift
-            entered_lift = lifts[lift]
-            all_competitor_lifts = dataframe[lift]
+        if isinstance(user_lifts[lift], numbers.Real): # valid numeric entry for lift
+            entered_lift = user_lifts[lift]
+            all_competitor_lifts = lifts_df[lift]
             number_of_lifts = all_competitor_lifts.count()
             number_of_smaller_lifts = all_competitor_lifts[all_competitor_lifts < entered_lift].count()
             percentile = (float(number_of_smaller_lifts)/number_of_lifts) * 100
-            percentiles.append(lift + ": " + str(percentile) + " percentile")
+            percentiles[lift] = ("%4.2f" % percentile) + " percentile"
         else: # no lift was entered
-            percentiles.append("N/A")
+            percentiles[lift] = "N/A"
     return percentiles
 
 def get_population_by_categories(connection, table, categories):
@@ -350,7 +352,7 @@ def get_lifts_from_user():
     # True if user entered valid numbers for all lifts, False otherwise
     valid_entries_for_all_lifts = \
         reduce(lambda x, y: isinstance(x, numbers.Real) \
-        and isinstance(y, Numbers.Real), user_entered_lifts)
+        and isinstance(y, numbers.Real), user_entered_lifts)
     if valid_entries_for_all_lifts:
         lifts[TOTAL] = lifts[SQUAT] + lifts[BENCH] + lifts[DEADLIFT]
     else:
