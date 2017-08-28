@@ -368,6 +368,7 @@ def main():
     print competition
     percentiles = find_percentile(competition, lifts)
     print percentiles
+    connection.close()
 
 ########################
 if __name__ == "__main__":
