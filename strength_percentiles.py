@@ -5,11 +5,10 @@
 # Version		: 1.0
 
 # This program scrapes revolutionpowerlifting.com for the results of a 2016
-# New York powerlifting meet, and loads them into a list of tuples.
-# Later versions of the program will allow users to enter their own lifting
-# numbers to be compared to the lifters from the competition.  They will be
-# able to see their percentile rank and where they would place among the
-# competitors in their demographic.
+# New York powerlifting meet and loads them into a local database.
+# User can enter their lifts, along with some personal information,to see
+# their percentile rank among lifters from the meet who match their
+# demographic.
 
 import urllib2
 from bs4 import BeautifulSoup
