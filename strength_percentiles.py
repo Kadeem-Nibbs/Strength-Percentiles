@@ -6,7 +6,7 @@
 
 # This program scrapes revolutionpowerlifting.com for the results of a 2016
 # New York powerlifting meet and loads them into a local database.
-# User can enter their lifts, along with some personal information,to see
+# Users can enter their lifts, along with some personal information, to see
 # their percentile rank among lifters from the meet who match their
 # demographic.
 
