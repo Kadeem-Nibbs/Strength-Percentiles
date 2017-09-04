@@ -1,8 +1,9 @@
 from flask import Flask, request, render_template, redirect
 import strength_percentiles as sp
-
+import sqlite3 as sq
 app = Flask(__name__)
-percentiles = ""
+
+percentiles_string = ""
 
 @app.before_request
 def before_request():
@@ -10,30 +11,32 @@ def before_request():
 
 @app.route('/')
 def index():
-    return render_template("home.html", percentiles=percentiles)
+    return render_template("home.html", percentiles_string=percentiles_string)
 
-# Never getting called, can't do anything with lifts
 @app.route('/enter_lifts')
 def get_lifts():
     return render_template("enter_lifts.html")
 
 @app.route('/calculate', methods=['POST'])
 def calculate_percentiles():
-    connection = sp.sq.connect(sp.DATABASE)
+    connection = sq.connect(sp.DATABASE)
     categories = {sp.GENDER: "", sp.EQUIPMENT: "", sp.PROFESSIONAL_STATUS: ""}
     competition = sp.get_population_by_categories(connection,
                                                   sp.MEET_RESULTS_TABLE,
                                                   categories)
-    squat = float(request.form['squat'])
-    bench = float(request.form['bench'])
-    deadlift = float(request.form['deadlift'])
-    total = squat + bench + deadlift
-    lifts = {sp.SQUAT: squat,
-             sp.BENCH: bench,
-             sp.DEADLIFT: bench,
-             sp.TOTAL: total}
-    global percentiles
-    percentiles = str(sp.find_percentile(competition, lifts))
+    lifts = {sp.SQUAT: None, sp.BENCH: None, sp.DEADLIFT: None, sp.TOTAL: None}
+    for lift in (sp.SQUAT, sp.BENCH, sp.DEADLIFT):
+        try:
+            lifts[lift] = float(request.form[lift])
+        except ValueError:
+            lifts[lift] = None
+    try:
+        lifts[sp.TOTAL] = sum(lifts.values())
+    except TypeError:
+        lifts[sp.TOTAL] = None
+    percentiles = sp.find_percentile(competition, lifts)
+    global percentiles_string
+    percentiles_string = sp.format_percentiles(percentiles)
     connection.close()
     return redirect('/')
 
