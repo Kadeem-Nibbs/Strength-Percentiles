@@ -79,12 +79,12 @@ def parse_row(row):
 
     Returns:
     --------
-    result_and_categories: tuple of strings and floats, or None
-        A tuple, the first three indices of which contain a lifter's
-        categorical information (gender, professional status, and equipment),
-        and the later indices of which contain their squat, bench, deadlift,
-        and total.  Returns None if the input row does not contain any lifter
-        information (is a header row).
+    result_and_categories: dictionary with string keys
+        A dictionary where the keys are the categories ('gender',
+        'professional_status', 'equpiment') and lifts ('squat', 'bench',
+        'deadlift', 'total').  The category keys hold string values and the
+        lift keys have float values, if data was available for the corresponding
+        lift, and None otherwise.
 
     """
     row = row.contents # list of HTML objects in row
@@ -239,7 +239,7 @@ def find_percentile(lifts_df, user_lifts):
             number_of_lifts = all_competitor_lifts.count()
             number_of_smaller_lifts = all_competitor_lifts[all_competitor_lifts < entered_lift].count()
             percentile = (float(number_of_smaller_lifts)/number_of_lifts) * 100
-            percentiles[lift] = ("%4.2f" % percentile) + " percentile"
+            percentiles[lift] = percentile
         else: # no lift was entered
             percentiles[lift] = "N/A"
     return percentiles
@@ -308,7 +308,6 @@ def get_categories_from_user():
             break
     return user_categories
 
-
 def get_lifts_from_user():
     """
     Prompts users for information on their lifts.  Returns a dictionary
@@ -342,21 +341,47 @@ def get_lifts_from_user():
                                     # user is lying or is superman
                     print "Okay Ronnie Coleman ... I'll ask you one more time."
                     continue
-            except ValueError: # user didn't enter a number
+            except (ValueError, TypeError): # user didn't enter a number
                 print "You did not enter a number.  Please try again."
             else:
                 lifts[lift] = response
                 break
-    user_entered_lifts = [lifts[SQUAT], lifts[BENCH], lifts[DEADLIFT]]
+    user_entered_lifts = (lifts[SQUAT], lifts[BENCH], lifts[DEADLIFT])
+    lifts_are_numbers = [isinstance(lift, numbers.Real) for lift in user_entered_lifts]
     # True if user entered valid numbers for all lifts, False otherwise
-    valid_entries_for_all_lifts = \
-        reduce(lambda x, y: isinstance(x, numbers.Real) \
-        and isinstance(y, numbers.Real), user_entered_lifts)
+    valid_entries_for_all_lifts = reduce(lambda x, y: x and y, lifts_are_numbers)
     if valid_entries_for_all_lifts:
         lifts[TOTAL] = lifts[SQUAT] + lifts[BENCH] + lifts[DEADLIFT]
     else:
         lifts[TOTAL] = None
     return lifts
+
+def format_percentiles(percentiles_dict):
+    """
+    Formats a dictionary a dictionary of floats, each float representing a
+    lifter's percentile rank in a lift among their population, into a string
+    for display.
+    Parameters:
+    -----------
+    percentiles_dict: dictionary with string keys and float or None values
+        A dictionary with keys 'squat', 'bench', 'deadlift', and 'total' and
+        float values representing their percentile rank in the lift.  The
+        value is None if a percentile rank for the lift is unavailable.
+    Returns:
+    --------
+    percentile_string: string
+        String containing the available information on the lifter's percentile
+        rank in the powerlifts.
+
+    """
+    percentile_string = ""
+    for key in (SQUAT, BENCH, DEADLIFT, TOTAL):
+        percentile = percentiles_dict[key]
+        if percentile != "N/A":
+            percentile_string += \
+                "\nYour %s ranks in the %4.2f percentile among your population.\n" \
+                % (key, percentile)
+    return percentile_string
 
 def main():
     populate_database(QUOTE_PAGE, DATABASE, MEET_RESULTS_TABLE)
@@ -364,9 +389,8 @@ def main():
     categories = get_categories_from_user()
     lifts = get_lifts_from_user()
     competition = get_population_by_categories(connection, MEET_RESULTS_TABLE, categories)
-    print competition
     percentiles = find_percentile(competition, lifts)
-    print percentiles
+    print format_percentiles(percentiles)
     connection.close()
 
 ########################
